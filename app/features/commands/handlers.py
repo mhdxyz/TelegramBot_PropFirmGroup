@@ -10,6 +10,7 @@ from app.features.commands.service import LotteryData
 LOTTERY_STATE = "lottery_state"
 LOTTERY_FULL_NAME = "lottery_full_name"
 LOTTERY_A_EMAIL = "lottery_a_email"
+LOTTERY_B_EMAIL = "lottery_b_email"
 
 
 async def lottery_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -17,8 +18,7 @@ async def lottery_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
     deps = get(context.application.bot_data)
     deps.core.authorizer.require_allowed(update.effective_user.id)
-    existing = await deps.commands.command_service._lottery.get_registration(update.effective_user.id)
-    if existing:
+    if await deps.commands.command_service.is_lottery_registered(update.effective_user.id):
         await update.message.reply_text("You are already registered for the lottery.")
         return
     context.user_data[LOTTERY_STATE] = LOTTERY_FULL_NAME
@@ -29,7 +29,7 @@ async def lottery_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     if update.effective_user is None or update.message is None or not update.message.text:
         return
     state = context.user_data.get(LOTTERY_STATE)
-    if state not in {LOTTERY_FULL_NAME, LOTTERY_A_EMAIL, "lottery_b_email"}:
+    if state not in {LOTTERY_FULL_NAME, LOTTERY_A_EMAIL, LOTTERY_B_EMAIL}:
         return
     text = update.message.text.strip()
     if state == LOTTERY_FULL_NAME:
@@ -39,7 +39,7 @@ async def lottery_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         return
     if state == LOTTERY_A_EMAIL:
         context.user_data[LOTTERY_A_EMAIL] = text
-        context.user_data[LOTTERY_STATE] = "lottery_b_email"
+        context.user_data[LOTTERY_STATE] = LOTTERY_B_EMAIL
         await update.message.reply_text("Now send the registration email you use at company B.")
         return
 
@@ -56,8 +56,6 @@ async def lottery_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         )
     except InvalidInputError as exc:
         await update.message.reply_text(exc.user_message)
-        if "already registered" in exc.user_message:
-            context.user_data.pop(LOTTERY_STATE, None)
         return
     except AppError as exc:
         await update.message.reply_text(exc.user_message)
@@ -66,9 +64,8 @@ async def lottery_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await update.message.reply_text("Lottery registration failed. No registration was saved. Please try again.")
         return
 
-    context.user_data.pop(LOTTERY_STATE, None)
-    context.user_data.pop(LOTTERY_FULL_NAME, None)
-    context.user_data.pop(LOTTERY_A_EMAIL, None)
+    for key in (LOTTERY_STATE, LOTTERY_FULL_NAME, LOTTERY_A_EMAIL):
+        context.user_data.pop(key, None)
     await update.message.reply_text("Registration completed successfully. Good luck!")
 
 
