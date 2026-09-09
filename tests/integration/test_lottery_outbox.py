@@ -1,7 +1,7 @@
 from pathlib import Path
 
-import aiosqlite
 import pytest
+import pytest_asyncio
 
 from app.core.exceptions import RepositoryError
 from app.database.connection import Database
@@ -10,7 +10,7 @@ from app.features.commands.export_worker import LotteryExportWorker
 from app.repositories.command_repository import SQLiteCommandRepository
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def database(tmp_path: Path):
     database = Database(str(tmp_path / "integration.db"))
     await database.connect()
@@ -106,14 +106,14 @@ async def test_excel_failure_keeps_committed_registration_and_pending_outbox(dat
 
 
 @pytest.mark.asyncio
-async def test_pending_outbox_is_retried_and_acknowledged(database: Database):
+async def test_pending_outbox_is_processed_and_acknowledged(database: Database):
     repository = SQLiteCommandRepository(database)
     await repository.create_registration(
         telegram_user_id=1004,
-        full_name="Retry User",
-        company_a_email="retry-a@example.com",
-        company_b_email="retry-b@example.com",
-        telegram_username="retry_user",
+        full_name="Pending User",
+        company_a_email="pending-a@example.com",
+        company_b_email="pending-b@example.com",
+        telegram_username="pending_user",
     )
 
     exporter = RecordingExporter()
