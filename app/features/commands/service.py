@@ -51,22 +51,23 @@ class CommandService:
                 company_b_email=company_b_email,
                 telegram_username=telegram_username,
             )
-            if self._exporter is not None:
-                try:
-                    self._exporter.append(
-                        telegram_user_id=telegram_user_id,
-                        data=LotteryData(full_name, company_a_email, company_b_email),
-                        telegram_username=telegram_username,
-                        registered_at=registration.registered_at,
-                    )
-                except Exception as exc:
-                    # The Excel mirror is secondary. SQLite remains the atomic
-                    # source of truth; log/reporting is handled at the boundary.
-                    raise RepositoryError(f"Excel export failed after database commit: {exc}") from exc
         except RepositoryError as exc:
             if "already exists" in str(exc):
                 raise InvalidInputError("duplicate lottery registration", user_message="You are already registered for the lottery.") from exc
             raise
+
+        if self._exporter is not None:
+            try:
+                self._exporter.append(
+                    telegram_user_id=telegram_user_id,
+                    data=LotteryData(full_name, company_a_email, company_b_email),
+                    telegram_username=telegram_username,
+                    registered_at=registration.registered_at,
+                )
+            except Exception as exc:
+                # The DB commit is the source of truth. Do not claim the Excel
+                # mirror is atomic with SQLite; surface this separately.
+                raise RepositoryError(f"Excel export failed after database commit: {exc}") from exc
 
     async def get_content(self, key: str) -> str | None:
         return await self._content.get_content(key)
