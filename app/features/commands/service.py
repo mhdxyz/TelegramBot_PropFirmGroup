@@ -17,11 +17,14 @@ class LotteryData:
 
 
 class CommandService:
-    """Application use-cases for normal bot commands; contains no AI dependency."""
+    """Application use-cases for normal bot commands; no AI dependency."""
 
     def __init__(self, lottery_repository: LotteryRepository, content_repository: ContentRepository) -> None:
         self._lottery = lottery_repository
         self._content = content_repository
+
+    async def is_lottery_registered(self, telegram_user_id: int) -> bool:
+        return await self._lottery.get_registration(telegram_user_id) is not None
 
     async def register_lottery(self, telegram_user_id: int, telegram_username: str | None, data: LotteryData) -> None:
         full_name = data.full_name.strip()
