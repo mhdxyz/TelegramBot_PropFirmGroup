@@ -16,32 +16,53 @@ class LotteryData:
     company_b_email: str
 
 
+class LotteryExporter:
+    def append(self, *, telegram_user_id: int, data: LotteryData,
+               telegram_username: str | None, registered_at: str) -> None: ...
+
+
 class CommandService:
     """Application use-cases for normal bot commands; no AI dependency."""
 
-    def __init__(self, lottery_repository: LotteryRepository, content_repository: ContentRepository) -> None:
+    def __init__(self, lottery_repository: LotteryRepository,
+                 content_repository: ContentRepository,
+                 lottery_exporter: LotteryExporter | None = None) -> None:
         self._lottery = lottery_repository
         self._content = content_repository
+        self._exporter = lottery_exporter
 
     async def is_lottery_registered(self, telegram_user_id: int) -> bool:
         return await self._lottery.get_registration(telegram_user_id) is not None
 
-    async def register_lottery(self, telegram_user_id: int, telegram_username: str | None, data: LotteryData) -> None:
+    async def register_lottery(self, telegram_user_id: int, telegram_username: str | None,
+                               data: LotteryData) -> None:
         full_name = data.full_name.strip()
         company_a_email = data.company_a_email.strip().lower()
         company_b_email = data.company_b_email.strip().lower()
-        if not full_name or len(full_name) > 200:
+        if not full_name or len(full_name) > 200 or len(full_name.split()) < 2:
             raise InvalidInputError("invalid full name", user_message="Please enter a valid first and last name.")
         if not _EMAIL_RE.fullmatch(company_a_email) or not _EMAIL_RE.fullmatch(company_b_email):
             raise InvalidInputError("invalid email", user_message="Please enter valid email addresses.")
         try:
-            await self._lottery.create_registration(
+            registration = await self._lottery.create_registration(
                 telegram_user_id=telegram_user_id,
                 full_name=full_name,
                 company_a_email=company_a_email,
                 company_b_email=company_b_email,
                 telegram_username=telegram_username,
             )
+            if self._exporter is not None:
+                try:
+                    self._exporter.append(
+                        telegram_user_id=telegram_user_id,
+                        data=LotteryData(full_name, company_a_email, company_b_email),
+                        telegram_username=telegram_username,
+                        registered_at=registration.registered_at,
+                    )
+                except Exception as exc:
+                    # The Excel mirror is secondary. SQLite remains the atomic
+                    # source of truth; log/reporting is handled at the boundary.
+                    raise RepositoryError(f"Excel export failed after database commit: {exc}") from exc
         except RepositoryError as exc:
             if "already exists" in str(exc):
                 raise InvalidInputError("duplicate lottery registration", user_message="You are already registered for the lottery.") from exc
