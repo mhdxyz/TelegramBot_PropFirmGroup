@@ -16,6 +16,7 @@ from app.features.ai.factory import build_all_available_providers
 from app.features.ai.handler import ai_message_handler
 from app.features.ai.service import AIService
 from app.features.commands.export import LotteryExcelExporter
+from app.features.commands.export_worker import LotteryExportWorker
 from app.features.commands.handlers import books_command, discount_command, lottery_command, lottery_input
 from app.features.commands.service import CommandService
 from app.repositories.command_repository import SQLiteCommandRepository
@@ -27,11 +28,12 @@ from app.webhook.app import create_app
 logger = get_logger(__name__)
 
 
-def _build_telegram_application(config: AppConfig, database: Database) -> Application:
+def _build_telegram_application(config: AppConfig, database: Database) -> tuple[Application, LotteryExportWorker]:
     user_repository = SQLiteUserRepository(database)
     command_repository = SQLiteCommandRepository(database)
     lottery_exporter = LotteryExcelExporter(config.database.lottery_excel_path)
-    command_service = CommandService(command_repository, command_repository, lottery_exporter)
+    lottery_export_worker = LotteryExportWorker(command_repository, lottery_exporter)
+    command_service = CommandService(command_repository, command_repository, command_repository)
 
     authorizer = Authorizer(config.security.allowed_user_ids, config.security.admin_user_ids)
     rate_limiter = SlidingWindowRateLimiter(
@@ -69,7 +71,7 @@ def _build_telegram_application(config: AppConfig, database: Database) -> Applic
 
     dependencies.store(application.bot_data, dependencies.Dependencies(core=core_deps, commands=command_deps, ai=ai_deps))
     application.add_error_handler(handle_error)
-    return application
+    return application, lottery_export_worker
 
 
 def create_asgi_app():
@@ -80,8 +82,8 @@ def create_asgi_app():
         raise SystemExit(1) from exc
     configure_logging(config.log_level)
     database = Database(sqlite_path_from_url(config.database.url))
-    telegram_application = _build_telegram_application(config, database)
-    return create_app(config, telegram_application, database)
+    telegram_application, lottery_export_worker = _build_telegram_application(config, database)
+    return create_app(config, telegram_application, database, lottery_export_worker)
 
 
 if __name__ == "__main__":
