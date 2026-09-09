@@ -32,6 +32,18 @@ CREATE TABLE IF NOT EXISTS bot_content (
     content TEXT NOT NULL,
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS lottery_export_outbox (
+    telegram_user_id INTEGER PRIMARY KEY,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT,
+    next_attempt_at TEXT NOT NULL DEFAULT (datetime('now')),
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (telegram_user_id) REFERENCES lottery_registrations(telegram_user_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_lottery_export_outbox_next_attempt
+    ON lottery_export_outbox(next_attempt_at, created_at);
 """
 
 
