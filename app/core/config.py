@@ -1,28 +1,17 @@
-"""
-Centralized, validated configuration.
-
-Everything sensitive comes from environment variables — never hard-coded.
-Configuration is loaded once at startup and passed explicitly to whatever
-needs it (dependency injection), rather than imported as a global from
-random modules. This keeps every component's dependencies visible in its
-constructor signature, which is what makes them mockable in tests.
-"""
+"""Centralized, validated configuration."""
 
 from __future__ import annotations
 
 import os
-from dotenv import load_dotenv
 from dataclasses import dataclass
 from enum import Enum
 
+from dotenv import load_dotenv
+
 load_dotenv()
 
-class AIProviderName(str, Enum):
-    """Only GEMINI is implemented today. Kept as an enum (rather than a
-    bare string) so a second provider is a one-line addition here plus a
-    new branch in features/ai/factory.py — nothing else needs to change
-    shape."""
 
+class AIProviderName(str, Enum):
     GEMINI = "gemini"
 
 
@@ -79,7 +68,7 @@ def _parse_id_list(raw: str | None) -> frozenset[int]:
     try:
         return frozenset(int(part.strip()) for part in raw.split(",") if part.strip())
     except ValueError as exc:
-        raise ConfigurationError(f"ALLOWED_TELEGRAM_USER_IDS must be comma-separated integers, got: {raw!r}") from exc
+        raise ConfigurationError(f"TELEGRAM user ID lists must contain integers, got: {raw!r}") from exc
 
 
 @dataclass(frozen=True)
@@ -105,18 +94,11 @@ class SecurityConfig:
 @dataclass(frozen=True)
 class DatabaseConfig:
     url: str
+    lottery_excel_path: str
 
 
 @dataclass(frozen=True)
 class WebhookConfig:
-    """Everything the webhook layer needs. `secret_token` is verified
-    against Telegram's `X-Telegram-Bot-Api-Secret-Token` header on every
-    incoming request — Telegram's own mechanism for authenticating that a
-    request actually came from Telegram's servers, so we don't need to
-    invent a bespoke scheme. `public_url`, when set, is used at startup to
-    register the webhook with Telegram; when unset, webhook registration is
-    assumed to be handled externally (e.g. by deployment tooling)."""
-
     path: str
     secret_token: str
     public_url: str | None
@@ -136,29 +118,17 @@ class AppConfig:
     @staticmethod
     def from_env(env: dict | None = None) -> "AppConfig":
         env = dict(os.environ if env is None else env)
-
         telegram_bot_token = _require(env, "TELEGRAM_BOT_TOKEN")
-
         ai_enabled = _optional_bool(env, "AI_ENABLED", False)
-
         default_provider_raw = _optional(env, "DEFAULT_AI_PROVIDER", AIProviderName.GEMINI.value)
         try:
             default_provider = AIProviderName(default_provider_raw)
         except ValueError as exc:
-            valid = ", ".join(p.value for p in AIProviderName)
-            raise ConfigurationError(
-                f"DEFAULT_AI_PROVIDER must be one of [{valid}], got: {default_provider_raw!r}"
-            ) from exc
-
+            raise ConfigurationError(f"Unsupported AI provider: {default_provider_raw!r}") from exc
         gemini_key = env.get("GEMINI_API_KEY")
-        # GEMINI_API_KEY is only required when AI is actually enabled — this
-        # is what lets the bot start with zero AI configuration when
-        # AI_ENABLED=false, per the enable/disable requirement.
         if ai_enabled and not gemini_key:
             raise ConfigurationError("GEMINI_API_KEY is required when AI_ENABLED=true")
-
         webhook_secret = _require(env, "WEBHOOK_SECRET")
-
         return AppConfig(
             telegram_bot_token=telegram_bot_token,
             environment=_optional(env, "ENVIRONMENT", "development"),
@@ -167,7 +137,7 @@ class AppConfig:
                 enabled=ai_enabled,
                 default_provider=default_provider,
                 gemini_api_key=gemini_key,
-                gemini_model=_optional(env,"GEMINI_MODEL","gemini-3.5-flash-lite"),
+                gemini_model=_optional(env, "GEMINI_MODEL", "gemini-3.5-flash-lite"),
                 gemini_file_search_store_name=env.get("GEMINI_FILE_SEARCH_STORE_NAME"),
                 request_timeout_seconds=_optional_float(env, "AI_REQUEST_TIMEOUT_SECONDS", 30.0),
                 max_retries=_optional_int(env, "AI_MAX_RETRIES", 2),
@@ -179,7 +149,10 @@ class AppConfig:
                 rate_limit_window_seconds=_optional_float(env, "RATE_LIMIT_WINDOW_SECONDS", 60.0),
                 max_message_length=_optional_int(env, "MAX_MESSAGE_LENGTH", 4000),
             ),
-            database=DatabaseConfig(url=_optional(env, "DATABASE_URL", "sqlite+aiosqlite:///./bot.db")),
+            database=DatabaseConfig(
+                url=_optional(env, "DATABASE_URL", "sqlite+aiosqlite:///./bot.db"),
+                lottery_excel_path=_optional(env, "LOTTERY_EXCEL_PATH", "./data/lottery_registrations.xlsx"),
+            ),
             webhook=WebhookConfig(
                 path=_optional(env, "WEBHOOK_PATH", "/webhook"),
                 secret_token=webhook_secret,
