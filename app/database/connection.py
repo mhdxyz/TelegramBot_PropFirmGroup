@@ -1,10 +1,8 @@
 """
 Database connection management.
 
-SQLite via aiosqlite is used as the default because it requires no external
-service for development/small deployments, while `UserRepository` (see
-repositories/user_repository.py) is defined as an interface so a Postgres
-implementation can be dropped in later without touching business logic.
+SQLite via aiosqlite is the default persistence layer. Business services use
+repository interfaces so storage can be replaced without changing handlers.
 """
 
 from __future__ import annotations
@@ -19,6 +17,33 @@ CREATE TABLE IF NOT EXISTS users (
     last_active_at TEXT NOT NULL DEFAULT (datetime('now')),
     message_count INTEGER NOT NULL DEFAULT 0
 );
+
+CREATE TABLE IF NOT EXISTS lottery_registrations (
+    telegram_user_id INTEGER PRIMARY KEY,
+    full_name TEXT NOT NULL,
+    company_a_email TEXT NOT NULL,
+    company_b_email TEXT NOT NULL,
+    telegram_username TEXT,
+    registered_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS bot_content (
+    content_key TEXT PRIMARY KEY,
+    content TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS lottery_export_outbox (
+    telegram_user_id INTEGER PRIMARY KEY,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT,
+    next_attempt_at TEXT NOT NULL DEFAULT (datetime('now')),
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (telegram_user_id) REFERENCES lottery_registrations(telegram_user_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_lottery_export_outbox_next_attempt
+    ON lottery_export_outbox(next_attempt_at, created_at);
 """
 
 
@@ -32,6 +57,7 @@ class Database:
     async def connect(self) -> None:
         self._connection = await aiosqlite.connect(self._path)
         await self._connection.execute("PRAGMA foreign_keys = ON;")
+        await self._connection.execute("PRAGMA journal_mode = WAL;")
         await self._connection.executescript(_SCHEMA)
         await self._connection.commit()
 
@@ -48,11 +74,6 @@ class Database:
 
 
 def sqlite_path_from_url(database_url: str) -> str:
-    """Extract a filesystem path from a `sqlite+aiosqlite:///path` URL.
-
-    A minimal, explicit parser rather than pulling in SQLAlchemy for a
-    single string transformation.
-    """
     prefix = "sqlite+aiosqlite:///"
     if not database_url.startswith(prefix):
         raise ValueError(f"Unsupported DATABASE_URL scheme: {database_url}")

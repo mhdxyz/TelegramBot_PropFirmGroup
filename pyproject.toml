@@ -1,12 +1,13 @@
 [project]
 name = "telegram-ai-bot"
-version = "0.2.0"
-description = "Webhook-based Telegram bot with an optional, pluggable Gemini AI feature"
+version = "0.3.0"
+description = "Webhook-based Telegram bot with independent command features and optional AI"
 requires-python = ">=3.11"
 dependencies = [
     "python-telegram-bot>=21.0",
     "google-generativeai>=0.7.0",
     "aiosqlite>=0.20.0",
+    "openpyxl>=3.1.0",
     "python-dotenv>=1.0.0",
     "fastapi>=0.110.0",
     "uvicorn[standard]>=0.29.0",
