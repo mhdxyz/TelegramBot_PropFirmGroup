@@ -4,7 +4,7 @@ import re
 from dataclasses import dataclass
 
 from app.core.exceptions import InvalidInputError, RepositoryError
-from app.repositories.command_repository import ContentRepository, LotteryRepository
+from app.repositories.command_repository import ContentRepository, LotteryRepository, LotteryExportQueueRepository
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
@@ -16,20 +16,15 @@ class LotteryData:
     company_b_email: str
 
 
-class LotteryExporter:
-    def append(self, *, telegram_user_id: int, data: LotteryData,
-               telegram_username: str | None, registered_at: str) -> None: ...
-
-
 class CommandService:
     """Application use-cases for normal bot commands; no AI dependency."""
 
     def __init__(self, lottery_repository: LotteryRepository,
                  content_repository: ContentRepository,
-                 lottery_exporter: LotteryExporter | None = None) -> None:
+                 export_queue_repository: LotteryExportQueueRepository | None = None) -> None:
         self._lottery = lottery_repository
         self._content = content_repository
-        self._exporter = lottery_exporter
+        self._export_queue = export_queue_repository or lottery_repository
 
     async def is_lottery_registered(self, telegram_user_id: int) -> bool:
         return await self._lottery.get_registration(telegram_user_id) is not None
@@ -44,7 +39,9 @@ class CommandService:
         if not _EMAIL_RE.fullmatch(company_a_email) or not _EMAIL_RE.fullmatch(company_b_email):
             raise InvalidInputError("invalid email", user_message="Please enter valid email addresses.")
         try:
-            registration = await self._lottery.create_registration(
+            # The repository writes the registration and outbox row in one
+            # SQLite transaction. The Telegram request never depends on Excel.
+            await self._lottery.create_registration(
                 telegram_user_id=telegram_user_id,
                 full_name=full_name,
                 company_a_email=company_a_email,
@@ -55,19 +52,6 @@ class CommandService:
             if "already exists" in str(exc):
                 raise InvalidInputError("duplicate lottery registration", user_message="You are already registered for the lottery.") from exc
             raise
-
-        if self._exporter is not None:
-            try:
-                self._exporter.append(
-                    telegram_user_id=telegram_user_id,
-                    data=LotteryData(full_name, company_a_email, company_b_email),
-                    telegram_username=telegram_username,
-                    registered_at=registration.registered_at,
-                )
-            except Exception as exc:
-                # The DB commit is the source of truth. Do not claim the Excel
-                # mirror is atomic with SQLite; surface this separately.
-                raise RepositoryError(f"Excel export failed after database commit: {exc}") from exc
 
     async def get_content(self, key: str) -> str | None:
         return await self._content.get_content(key)
