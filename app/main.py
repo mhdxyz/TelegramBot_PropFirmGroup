@@ -15,6 +15,7 @@ from app.features.ai.chat_service import ChatService
 from app.features.ai.factory import build_all_available_providers
 from app.features.ai.handler import ai_message_handler
 from app.features.ai.service import AIService
+from app.features.commands.export import LotteryExcelExporter
 from app.features.commands.handlers import books_command, discount_command, lottery_command, lottery_input
 from app.features.commands.service import CommandService
 from app.repositories.command_repository import SQLiteCommandRepository
@@ -29,7 +30,8 @@ logger = get_logger(__name__)
 def _build_telegram_application(config: AppConfig, database: Database) -> Application:
     user_repository = SQLiteUserRepository(database)
     command_repository = SQLiteCommandRepository(database)
-    command_service = CommandService(command_repository, command_repository)
+    lottery_exporter = LotteryExcelExporter(config.database.lottery_excel_path)
+    command_service = CommandService(command_repository, command_repository, lottery_exporter)
 
     authorizer = Authorizer(config.security.allowed_user_ids, config.security.admin_user_ids)
     rate_limiter = SlidingWindowRateLimiter(
@@ -44,8 +46,6 @@ def _build_telegram_application(config: AppConfig, database: Database) -> Applic
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("lottery", lottery_command))
     application.add_handler(CommandHandler("discount", discount_command))
-    # Telegram command names cannot contain spaces; the menu label remains
-    # "Books and Resources" while the executable command is /books_and_resources.
     application.add_handler(CommandHandler("books_and_resources", books_command))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, lottery_input), group=-1)
 
@@ -67,10 +67,7 @@ def _build_telegram_application(config: AppConfig, database: Database) -> Applic
         application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, ai_disabled_handler))
         logger.info("ai_feature_disabled")
 
-    dependencies.store(
-        application.bot_data,
-        dependencies.Dependencies(core=core_deps, commands=command_deps, ai=ai_deps),
-    )
+    dependencies.store(application.bot_data, dependencies.Dependencies(core=core_deps, commands=command_deps, ai=ai_deps))
     application.add_error_handler(handle_error)
     return application
 
