@@ -4,15 +4,15 @@ from pathlib import Path
 
 from openpyxl import Workbook, load_workbook
 
-from app.features.commands.service import LotteryData
+from app.repositories.command_repository import LotteryExportJob
 
 
 class LotteryExcelExporter:
-    """Best-effort durable Excel mirror for committed lottery registrations.
+    """Idempotent Excel mirror for committed lottery registrations.
 
-    SQLite remains the source of truth. The exporter writes to a temporary
-    file and atomically replaces the target, so a failed write cannot leave
-    a partially-written workbook.
+    SQLite is the source of truth. A registration can be exported repeatedly
+    without creating duplicate rows, which makes crash recovery safe when the
+    worker succeeds in Excel but crashes before acknowledging the outbox job.
     """
 
     HEADERS = [
@@ -27,31 +27,47 @@ class LotteryExcelExporter:
     def __init__(self, path: str) -> None:
         self._path = Path(path)
 
-    def append(self, *, telegram_user_id: int, data: LotteryData,
-               telegram_username: str | None, registered_at: str) -> None:
+    def upsert(self, job: LotteryExportJob) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)
         temp = self._path.with_suffix(self._path.suffix + ".tmp")
+        workbook = None
         try:
             if self._path.exists():
                 workbook = load_workbook(self._path)
                 sheet = workbook.active
+                if sheet.max_row == 1 and sheet.cell(1, 1).value is None:
+                    sheet.delete_rows(1)
             else:
                 workbook = Workbook()
                 sheet = workbook.active
                 sheet.title = "Lottery Registrations"
                 sheet.append(self.HEADERS)
 
-            sheet.append([
-                telegram_user_id,
-                data.full_name,
-                data.company_a_email,
-                data.company_b_email,
-                f"@{telegram_username}" if telegram_username else "",
-                registered_at,
-            ])
+            values = [
+                job.telegram_user_id,
+                job.full_name,
+                job.company_a_email,
+                job.company_b_email,
+                f"@{job.telegram_username}" if job.telegram_username else "",
+                job.registered_at,
+            ]
+
+            existing_row = None
+            for row in range(2, sheet.max_row + 1):
+                if sheet.cell(row, 1).value == job.telegram_user_id:
+                    existing_row = row
+                    break
+
+            if existing_row is None:
+                sheet.append(values)
+            else:
+                for column, value in enumerate(values, start=1):
+                    sheet.cell(existing_row, column, value)
+
             workbook.save(temp)
-            workbook.close()
             temp.replace(self._path)
         finally:
+            if workbook is not None:
+                workbook.close()
             if temp.exists():
                 temp.unlink(missing_ok=True)
