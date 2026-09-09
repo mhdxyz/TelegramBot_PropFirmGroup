@@ -21,11 +21,12 @@ def build_provider(name: AIProviderName, config: AIConfig) -> AIProvider:
         if not config.gemini_api_key:
             raise AIAuthError("gemini", "GEMINI_API_KEY is not configured")
         return GeminiProvider(
-            api_key=config.gemini_api_key,
-            model=config.gemini_model,
-            timeout_seconds=config.request_timeout_seconds,
-            max_retries=config.max_retries,
-        )
+    api_key=config.gemini_api_key,
+    model=config.gemini_model,
+    file_search_store_name=config.gemini_file_search_store_name,
+    timeout_seconds=config.request_timeout_seconds,
+    max_retries=config.max_retries,
+    )
 
     raise ValueError(f"Unknown AI provider: {name}")
 

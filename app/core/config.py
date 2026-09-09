@@ -11,9 +11,11 @@ constructor signature, which is what makes them mockable in tests.
 from __future__ import annotations
 
 import os
+from dotenv import load_dotenv
 from dataclasses import dataclass
 from enum import Enum
 
+load_dotenv()
 
 class AIProviderName(str, Enum):
     """Only GEMINI is implemented today. Kept as an enum (rather than a
@@ -86,6 +88,7 @@ class AIConfig:
     default_provider: AIProviderName
     gemini_api_key: str | None
     gemini_model: str
+    gemini_file_search_store_name: str | None
     request_timeout_seconds: float
     max_retries: int
 
@@ -164,7 +167,8 @@ class AppConfig:
                 enabled=ai_enabled,
                 default_provider=default_provider,
                 gemini_api_key=gemini_key,
-                gemini_model=_optional(env, "GEMINI_MODEL", "gemini-1.5-flash"),
+                gemini_model=_optional(env,"GEMINI_MODEL","gemini-3.5-flash-lite"),
+                gemini_file_search_store_name=env.get("GEMINI_FILE_SEARCH_STORE_NAME"),
                 request_timeout_seconds=_optional_float(env, "AI_REQUEST_TIMEOUT_SECONDS", 30.0),
                 max_retries=_optional_int(env, "AI_MAX_RETRIES", 2),
             ),
