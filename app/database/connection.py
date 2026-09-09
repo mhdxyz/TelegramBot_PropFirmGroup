@@ -24,8 +24,7 @@ CREATE TABLE IF NOT EXISTS lottery_registrations (
     company_a_email TEXT NOT NULL,
     company_b_email TEXT NOT NULL,
     telegram_username TEXT,
-    registered_at TEXT NOT NULL DEFAULT (datetime('now')),
-    FOREIGN KEY (telegram_user_id) REFERENCES users(telegram_user_id) ON DELETE CASCADE
+    registered_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS bot_content (
