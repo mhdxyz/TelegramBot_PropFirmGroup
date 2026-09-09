@@ -22,12 +22,14 @@ from telegram.ext import Application
 from app.core.config import AppConfig
 from app.core.logging import get_logger
 from app.database.connection import Database
+from app.features.commands.export_worker import LotteryExportWorker
 from app.webhook.routes import router
 
 logger = get_logger(__name__)
 
 
-def create_app(config: AppConfig, telegram_application: Application, database: Database) -> FastAPI:
+def create_app(config: AppConfig, telegram_application: Application, database: Database,
+               lottery_export_worker: LotteryExportWorker | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         # Connecting here (rather than in main.py) guarantees this runs on
@@ -36,6 +38,8 @@ def create_app(config: AppConfig, telegram_application: Application, database: D
         await database.connect()
         await telegram_application.initialize()
         await telegram_application.start()
+        if lottery_export_worker is not None:
+            lottery_export_worker.start()
 
         if config.webhook.public_url:
             full_url = config.webhook.public_url.rstrip("/") + config.webhook.path
@@ -51,6 +55,8 @@ def create_app(config: AppConfig, telegram_application: Application, database: D
         try:
             yield
         finally:
+            if lottery_export_worker is not None:
+                await lottery_export_worker.stop()
             await telegram_application.stop()
             await telegram_application.shutdown()
             await database.close()
