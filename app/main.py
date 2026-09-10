@@ -1,11 +1,12 @@
 """Composition root for the bot."""
 
 from __future__ import annotations
+from email.mime import application
 
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
 
+from app.features.admin.handlers import admin_command
 from app.bot import dependencies
-from app.bot.handlers.fallback import ai_disabled_handler
 from app.bot.handlers.start import help_command, start_command
 from app.bot.middleware.error_boundary import handle_error
 from app.core.config import AppConfig, ConfigurationError
@@ -15,15 +16,17 @@ from app.features.ai.chat_service import ChatService
 from app.features.ai.factory import build_all_available_providers
 from app.features.ai.handler import ai_message_handler
 from app.features.ai.service import AIService
+from app.features.commands.conversation import build_lottery_conversation_handler
 from app.features.commands.export import LotteryExcelExporter
 from app.features.commands.export_worker import LotteryExportWorker
-from app.features.commands.handlers import books_command, discount_command, lottery_command, lottery_input
+from app.features.commands.handlers import books_command, discount_command
 from app.features.commands.service import CommandService
 from app.repositories.command_repository import SQLiteCommandRepository
 from app.repositories.user_repository import SQLiteUserRepository
 from app.security.authorization import Authorizer
 from app.security.rate_limiter import SlidingWindowRateLimiter
 from app.webhook.app import create_app
+
 
 logger = get_logger(__name__)
 
@@ -43,34 +46,82 @@ def _build_telegram_application(config: AppConfig, database: Database) -> tuple[
     core_deps = dependencies.CoreDependencies(authorizer=authorizer, rate_limiter=rate_limiter)
     command_deps = dependencies.CommandDependencies(command_service=command_service)
 
-    application = Application.builder().token(config.telegram_bot_token).build()
+    application = (
+    Application.builder()
+    .token(config.telegram_bot_token)
+    .concurrent_updates(False)
+    .build()
+    )
+    
+    
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CommandHandler("lottery", lottery_command))
+    application.add_handler(CommandHandler("admin", admin_command))
     application.add_handler(CommandHandler("discount", discount_command))
-    application.add_handler(CommandHandler("books_and_resources", books_command))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, lottery_input), group=-1)
+    application.add_handler(
+        CommandHandler("books_and_resources", books_command)
+    )
 
+    application.add_handler(
+        build_lottery_conversation_handler()
+        )
+    
+    
     ai_deps: dependencies.AIDependencies | None = None
+
     if config.ai.enabled:
         providers = build_all_available_providers(config.ai)
+
         if not providers:
-            raise ConfigurationError("AI_ENABLED=true but no AI provider is configured (set GEMINI_API_KEY).")
-        ai_service = AIService(providers, config.ai.default_provider)
+            raise ConfigurationError(
+                "AI_ENABLED=true but no AI provider is configured "
+                "(set GEMINI_API_KEY)."
+            )
+
+        ai_service = AIService(
+            providers,
+            config.ai.default_provider,
+        )
+
         chat_service = ChatService(
             ai_service=ai_service,
             user_repository=user_repository,
             max_message_length=config.security.max_message_length,
         )
-        ai_deps = dependencies.AIDependencies(chat_service=chat_service)
-        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, ai_message_handler))
-        logger.info("ai_feature_enabled", extra={"provider": config.ai.default_provider.value})
+
+        ai_deps = dependencies.AIDependencies(
+            chat_service=chat_service
+        )
+
+        application.add_handler(
+            MessageHandler(
+                filters.TEXT & ~filters.COMMAND,
+                ai_message_handler,
+            ),
+            group=1,
+        )
+
+        logger.info(
+            "ai_feature_enabled",
+            extra={
+                "provider": config.ai.default_provider.value
+            },
+        )
+
     else:
-        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, ai_disabled_handler))
         logger.info("ai_feature_disabled")
 
-    dependencies.store(application.bot_data, dependencies.Dependencies(core=core_deps, commands=command_deps, ai=ai_deps))
+    dependencies.store(
+        application.bot_data,
+        dependencies.Dependencies(
+            core=core_deps,
+            commands=command_deps,
+            ai=ai_deps,
+        ),
+    )
+
     application.add_error_handler(handle_error)
+
     return application, lottery_export_worker
 
 

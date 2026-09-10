@@ -3,6 +3,10 @@ __pycache__/
 *.db
 *.egg-info/
 
+# Data and Files
+data/
+.xlsx
+lottery_registrations.xlsx
 
 # Environment variables / secrets
 .env
